@@ -87,9 +87,18 @@ jobs:
       - name: Install required SDK components once (runner-preinstalled SDK, licenses accepted)
         run: |
           export ANDROID_HOME=/usr/local/lib/android/sdk
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37" "build-tools;37.0.0"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list_installed | grep -E "platforms;android-37|build-tools;37.0.0"
+          ctl="$ANDROID_HOME/cmdline-tools/16.0"
+          if [ ! -x "$ctl/bin/sdkmanager" ]; then
+            curl -sSo /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip
+            unzip -q -o /tmp/cmdline-tools.zip -d "$ctl-tmp"
+            mkdir -p "$ctl"
+            mv "$ctl-tmp/cmdline-tools"/* "$ctl/"
+            rm -rf "$ctl-tmp"
+          fi
+          "$ctl/bin/sdkmanager" --version
+          yes | "$ctl/bin/sdkmanager" --licenses > /dev/null
+          "$ctl/bin/sdkmanager" --install "platforms;android-37.0" "build-tools;37.0.0"
+          "$ctl/bin/sdkmanager" --list_installed | grep -E "platforms;android-37\.0|build-tools;37\.0\.0"
 
       - name: Decode acceptance keystore from secret (only secret-touching step)
         env:
