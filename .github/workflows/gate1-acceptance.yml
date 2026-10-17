@@ -1,0 +1,162 @@
+name: gate1-acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate1-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      UPSTREAM_SOURCE_SHA: 3b470a2e87058d78a065d49e87a3100140c3ae43
+      GRADLE_WRAPPER_JAR_SHA256: 498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17
+      GATE1_PATCH_SHA256: 35704cd0ae75d59e85d01c0198cb2f019b9dd86ffd5c18fa2b3de7fa98b75981
+    steps:
+      - name: Checkout upstream source at pinned SHA
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: SysAdminDoc/ClearCut
+          ref: 3b470a2e87058d78a065d49e87a3100140c3ae43
+          fetch-depth: 1
+          persist-credentials: false
+          path: clearcut-src
+
+      - name: Checkout build driver
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          path: driver
+
+      - name: Assert pinned upstream HEAD
+        run: |
+          actual="$(git -C clearcut-src rev-parse HEAD)"
+          echo "upstream HEAD: $actual"
+          [ "$actual" = "$UPSTREAM_SOURCE_SHA" ] || { echo "HEAD mismatch"; exit 1; }
+
+      - name: Assert acceptance patch digest
+        run: |
+          actual="$(sha256sum driver/gate1-acceptance.patch | cut -d' ' -f1)"
+          echo "patch sha256: $actual"
+          [ "$actual" = "$GATE1_PATCH_SHA256" ] || { echo "patch digest mismatch"; exit 1; }
+
+      - name: Apply acceptance patch
+        run: |
+          git -C clearcut-src apply --check driver/gate1-acceptance.patch
+          git -C clearcut-src apply driver/gate1-acceptance.patch
+
+      - name: Verify changed-file set (tracked + untracked, temporary index)
+        run: |
+          cd clearcut-src
+          git add -N app/src/acceptance/res/values/strings.xml
+          printf 'app/build.gradle.kts\napp/src/acceptance/res/values/strings.xml\n' > /tmp/expected.txt
+          git diff --name-only HEAD > /tmp/changed.txt
+          echo "changed files after patch:"
+          cat /tmp/changed.txt
+          diff <(sort /tmp/changed.txt) <(sort /tmp/expected.txt) || { echo "unexpected source change"; exit 1; }
+          extra="$(git status --porcelain | wc -l)"
+          [ "$extra" -eq 2 ] || { echo "unexpected extra working-tree change"; git status --porcelain; exit 1; }
+
+      - name: Validate Gradle wrapper JAR before first execution (authoritative checksum)
+        run: |
+          actual="$(sha256sum clearcut-src/gradle/wrapper/gradle-wrapper.jar | cut -d' ' -f1)"
+          echo "wrapper jar sha256: $actual"
+          [ "$actual" = "$GRADLE_WRAPPER_JAR_SHA256" ] || { echo "wrapper jar digest mismatch against gradle.org/release-checksums reference"; exit 1; }
+
+      - name: Prepare Gradle runner (official wrapper validation runs automatically)
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        with:
+          cache-disabled: true
+          add-job-summary: false
+          build-scan-publish: false
+
+      - name: Set up JDK 21 (AGP 9.4.1 org.gradle.jvm.version=17; Gradle 9.8 supports Java up to 27)
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install required SDK components once (licenses accepted, no reruns)
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager --install "platforms;android-37" "build-tools;37.0.0" > /dev/null
+
+      - name: Decode acceptance keystore from secret (only secret-touching step)
+        env:
+          ACCEPTANCE_STORE_B64: ${{ secrets.ACCEPTANCE_STORE_B64 }}
+        run: |
+          [ -n "$ACCEPTANCE_STORE_B64" ] || { echo "ACCEPTANCE secrets not configured"; exit 1; }
+          echo "$ACCEPTANCE_STORE_B64" | base64 -d > "$RUNNER_TEMP/acceptance.jks"
+
+      - name: Build arm64-v8a acceptance APK (single attempt, no fallback)
+        env:
+          ACCEPTANCE_STORE_FILE: ${{ runner.temp }}/acceptance.jks
+          ACCEPTANCE_STORE_PASSWORD: ${{ secrets.ACCEPTANCE_STORE_PASSWORD }}
+          ACCEPTANCE_KEY_ALIAS: ${{ secrets.ACCEPTANCE_KEY_ALIAS }}
+          ACCEPTANCE_KEY_PASSWORD: ${{ secrets.ACCEPTANCE_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon :app:assembleAcceptance
+        working-directory: clearcut-src
+
+      - name: Discover the actual arm64-v8a APK output
+        run: |
+          cd clearcut-src
+          mapfile -t apks < <(ls app/build/outputs/apk/acceptance/*.apk 2>/dev/null)
+          echo "discovered APK outputs:"
+          printf '%s\n' "${apks[@]}"
+          [ "${#apks[@]}" -eq 1 ] || { echo "expected exactly 1 APK, got ${#apks[@]}"; exit 1; }
+          printf '%s\n' "${apks[0]}" > "$RUNNER_TEMP/apk-path.txt"
+
+      - name: Record provenance (identities + digests, no secrets)
+        run: |
+          cd clearcut-src
+          apk_path="$(cat "$RUNNER_TEMP/apk-path.txt")"
+          apk_name="$(basename "$apk_path")"
+          bt="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          apk_sha="$(sha256sum "$apk_path" | cut -d' ' -f1)"
+          cert_sha="$("$bt/apksigner" verify --print-certs "$apk_path" | grep -i 'SHA-256' | head -1 | sed 's/.*: *//')"
+          pkg="$("$bt/aapt2" dump badging "$apk_path" | grep '^package:' | head -1)"
+          echo "build-driver commit SHA: $GITHUB_SHA"
+          echo "upstream source SHA: $UPSTREAM_SOURCE_SHA"
+          echo "patch sha256: $GATE1_PATCH_SHA256"
+          echo "APK name: $apk_name"
+          echo "APK sha256: $apk_sha"
+          echo "cert sha256: $cert_sha"
+          echo "package info: $pkg"
+          {
+            echo "{"
+            echo "  \"build_driver_commit_sha\": \"$GITHUB_SHA\","
+            echo "  \"upstream_source_commit_sha\": \"$UPSTREAM_SOURCE_SHA\","
+            echo "  \"patch_sha256\": \"$GATE1_PATCH_SHA256\","
+            echo "  \"gradle_wrapper_jar_sha256\": \"$GRADLE_WRAPPER_JAR_SHA256\","
+            echo "  \"apk_name\": \"$apk_name\","
+            echo "  \"apk_sha256\": \"$apk_sha\","
+            echo "  \"certificate_sha256\": \"$cert_sha\","
+            echo "  \"package\": \"$pkg\""
+            echo "}"
+          } > "$GITHUB_WORKSPACE/provenance.json"
+
+      - name: Upload artifact (APK + provenance only, never secrets)
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: clearcut-gate1-acceptance-apk
+          path: |
+            clearcut-src/app/build/outputs/apk/acceptance/*.apk
+            provenance.json
+          retention-days: 7
+        if: success()
+
+      - name: Scrub signing material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/acceptance.jks" || true
+          rm -f "$GITHUB_WORKSPACE/keystore.properties" || true

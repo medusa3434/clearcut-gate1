@@ -1,0 +1,89 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index e24c424..0592398 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -25,6 +25,10 @@ val runtimeNoticeGeneratedDir = layout.buildDirectory.dir("generated/source/runt
+ val bundleTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+     taskName.substringAfterLast(':').startsWith("bundle", ignoreCase = true)
+ }
++val acceptanceTaskRequested = gradle.startParameter.taskNames.any { taskName ->
++    taskName.substringAfterLast(':').startsWith("assembleAcceptance", ignoreCase = true) ||
++        taskName.substringAfterLast(':').startsWith("bundleAcceptance", ignoreCase = true)
++}
+ 
+ android {
+     namespace = "com.novacut.editor"
+@@ -77,6 +81,18 @@ android {
+                 }
+             }
+         }
++        create("acceptance") {
++            val storePath = resolveSigningSecret("ACCEPTANCE_STORE_FILE")
++            val storePass = resolveSigningSecret("ACCEPTANCE_STORE_PASSWORD")
++            val alias = resolveSigningSecret("ACCEPTANCE_KEY_ALIAS")
++            val keyPass = resolveSigningSecret("ACCEPTANCE_KEY_PASSWORD")
++            if (!storePath.isNullOrBlank() && !storePass.isNullOrBlank() && !alias.isNullOrBlank() && !keyPass.isNullOrBlank()) {
++                storeFile = rootProject.file(storePath)
++                storePassword = storePass
++                keyAlias = alias
++                keyPassword = keyPass
++            }
++        }
+     }
+ 
+     buildTypes {
+@@ -112,6 +128,16 @@ android {
+             matchingFallbacks += listOf("debug")
+             buildConfigField("boolean", "QA_TIMELINE_HARNESS_ENABLED", "true")
+         }
++        create("acceptance") {
++            initWith(getByName("release"))
++            applicationIdSuffix = ".acceptance"
++            versionNameSuffix = "-acceptance"
++            buildConfigField("boolean", "QA_TIMELINE_HARNESS_ENABLED", "false")
++            ndk {
++                abiFilters = mutableSetOf("arm64-v8a")
++            }
++            signingConfig = signingConfigs.getByName("acceptance")
++        }
+     }
+ 
+     // The bundled FFmpeg, ONNX Runtime, MediaPipe, and DeepFilterNet native
+@@ -122,8 +148,8 @@ android {
+     // cannot determine their ABI or who sideloads across devices.
+     splits {
+         abi {
+-            isEnable = !bundleTaskRequested
+-            if (!bundleTaskRequested) {
++            isEnable = !bundleTaskRequested && !acceptanceTaskRequested
++            if (!bundleTaskRequested && !acceptanceTaskRequested) {
+                 reset()
+                 include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+                 isUniversalApk = true
+@@ -165,6 +191,7 @@ android {
+     sourceSets {
+         getByName("main").java.directories.add(runtimeNoticeGeneratedDir.get().asFile.absolutePath)
+         getByName("androidTest").assets.directories += "$projectDir/schemas"
++        getByName("acceptance").res.srcDirs("src/acceptance/res")
+     }
+ 
+     lint {
+@@ -751,7 +778,7 @@ tasks.withType<Test>().configureEach {
+ }
+ 
+ tasks.configureEach {
+-    if (name == "preReleaseBuild") {
++    if (name == "preReleaseBuild" || name == "preAcceptanceBuild") {
+         dependsOn(generateNativeSbom)
+         dependsOn(verifyResolvedAdvisoryFloors)
+     }
+diff --git a/app/src/acceptance/res/values/strings.xml b/app/src/acceptance/res/values/strings.xml
+new file mode 100644
+index 0000000..69325c7
+--- /dev/null
++++ b/app/src/acceptance/res/values/strings.xml
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">ClearCut Acceptance</string>
++</resources>
