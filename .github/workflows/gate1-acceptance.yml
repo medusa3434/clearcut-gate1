@@ -1,7 +1,11 @@
 name: gate1-acceptance
 
 on:
-  workflow_dispatch:
+  workflow_dispatch
+
+env:
+  DEVELOCITY_INJECTION_ENABLED: 'false'
+:
 
 permissions:
   contents: read
