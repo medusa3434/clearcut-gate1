@@ -75,7 +75,7 @@ jobs:
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-disabled: true
-          add-job-summary: false
+          add-job-summary: 'never'
           build-scan-publish: false
 
       - name: Set up JDK 21 (AGP 9.4.1 org.gradle.jvm.version=17; Gradle 9.8 supports Java up to 27)
@@ -84,13 +84,12 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
-      - name: Install required SDK components once (licenses accepted, no reruns)
+      - name: Install required SDK components once (runner-preinstalled SDK, licenses accepted)
         run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager --install "platforms;android-37" "build-tools;37.0.0" > /dev/null
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37" "build-tools;37.0.0"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list_installed | grep -E "platforms;android-37|build-tools;37.0.0"
 
       - name: Decode acceptance keystore from secret (only secret-touching step)
         env:
