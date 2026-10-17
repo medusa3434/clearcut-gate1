@@ -20,7 +20,7 @@ jobs:
     env:
       UPSTREAM_SOURCE_SHA: 3b470a2e87058d78a065d49e87a3100140c3ae43
       GRADLE_WRAPPER_JAR_SHA256: 498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17
-      GATE1_PATCH_SHA256: 35704cd0ae75d59e85d01c0198cb2f019b9dd86ffd5c18fa2b3de7fa98b75981
+      GATE1_PATCH_SHA256: bb93db4b3482c5c44a3eb20455030dfd496430d5c431b2164deb84b4d33ce07a
     steps:
       - name: Checkout upstream source at pinned SHA
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
