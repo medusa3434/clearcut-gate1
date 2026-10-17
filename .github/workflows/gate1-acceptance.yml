@@ -49,8 +49,9 @@ jobs:
 
       - name: Apply acceptance patch
         run: |
-          git -C clearcut-src apply --check driver/gate1-acceptance.patch
-          git -C clearcut-src apply driver/gate1-acceptance.patch
+          patch_path="$GITHUB_WORKSPACE/driver/gate1-acceptance.patch"
+          git -C clearcut-src apply --check "$patch_path"
+          git -C clearcut-src apply "$patch_path"
 
       - name: Verify changed-file set (tracked + untracked, temporary index)
         run: |
