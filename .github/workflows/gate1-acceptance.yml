@@ -113,7 +113,9 @@ jobs:
           ACCEPTANCE_STORE_PASSWORD: ${{ secrets.ACCEPTANCE_STORE_PASSWORD }}
           ACCEPTANCE_KEY_ALIAS: ${{ secrets.ACCEPTANCE_KEY_ALIAS }}
           ACCEPTANCE_KEY_PASSWORD: ${{ secrets.ACCEPTANCE_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon :app:assembleAcceptance
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:assembleAcceptance
         working-directory: clearcut-src
 
       - name: Discover the actual arm64-v8a APK output
